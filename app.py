@@ -11,8 +11,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 API_URL = "http://bio.thug4ff.com/update_bio"
 KEY = "great"
-
-
+PORT = int(os.getenv("PORT", 5000))  # Render fournit le port via la variable d'environnement
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -20,14 +19,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 session = None
-
-@bot.event
-async def on_ready():
-    global session
-    if session is None:
-        session = aiohttp.ClientSession()
-    print(f"Logged in as {bot.user}")
-    
 cooldowns = {}
 
 REGIONS = {
@@ -52,19 +43,21 @@ def format_region(code: str):
         return f"{flag} {name}"
     return code
 
-
+@bot.event
+async def on_ready():
+    global session
+    if session is None:
+        session = aiohttp.ClientSession()
+    print(f"Logged in as {bot.user}")
 
 @bot.command(name="bio")
 async def bio(ctx, access_token: str = None, *, bio: str = None):
     if not access_token or not bio:
         return await ctx.reply(
-            "**Usage:**\n"
-            "`!bio <access_token> <new bio>`\n\n"
-            "**Example:**\n"
-            "`!bio ABC123 Hello world!`"
+            "**Usage:**\n`!bio <access_token> <new bio>`\n\n"
+            "**Example:**\n`!bio ABC123 Hello world!`"
         )
 
-    # Cooldown (30s)
     now = datetime.now().timestamp()
     last = cooldowns.get(ctx.author.id, 0)
     if now - last < 30:
@@ -87,14 +80,12 @@ async def bio(ctx, access_token: str = None, *, bio: str = None):
         async with session.get(url) as resp:
             if resp.status != 200:
                 return await ctx.send("❌ API error.", delete_after=6)
-
             data = await resp.json()
 
         if data.get("status") == "error":
             return await ctx.send("❌ Invalid or expired token.", delete_after=6)
 
         region = format_region(data.get("region", "UNK"))
-
 
         embed = discord.Embed(
             title="✅ Bio Updated !",
@@ -107,18 +98,27 @@ async def bio(ctx, access_token: str = None, *, bio: str = None):
                 f"> **New Bio:** ||{data.get('bio', '')}||"
             )
         )
-
         embed.set_thumbnail(url=ctx.author.display_avatar.url)
         embed.set_footer(text="DEVELOPED BY THUG4FF")
-
         await ctx.send(ctx.author.mention, embed=embed)
 
     except Exception as e:
         print(e)
         await ctx.send("❌ Unexpected error.", delete_after=6)
 
-@bot.event
-async def on_close():
-    await session.close()
+async def start_web_server():
+    app = aiohttp.web.Application()
+    async def handle(request):
+        return aiohttp.web.Response(text="Bot is running ✅")
+    app.router.add_get("/", handle)
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    print(f"Web server running on port {PORT}")
 
-bot.run(TOKEN)
+async def main():
+    await start_web_server()
+    await bot.start(TOKEN)
+
+asyncio.run(main())
